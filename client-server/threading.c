@@ -1,5 +1,8 @@
 #include <semaphore.h>
 #include <thread>
+#include <signal.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define MAX_THREADS         50
 
