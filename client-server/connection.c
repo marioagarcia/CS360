@@ -52,3 +52,13 @@ void bind_socket( int server_socket_fd, int port )
   );
 
 }
+
+void close_socket(int h_socket)
+{
+  // printf("\nClosing socket\n");
+  if(close(h_socket) == SOCKET_ERROR)
+  {
+    printf("\nCould not close socket\n");
+    exit(0);
+  }
+}

@@ -1,6 +1,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <string.h>
+#include <cstring>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,17 +14,17 @@ void* serve(void * in_data);
 
 #define SOCKET_ERROR        -1
 #define BUFFER_SIZE         4000
-#define MAX_FILE_SIZE       126976
 
 char * directory_path;
 int thread_num;
 
+#include "utils.c"
+#include "cgi-utils.c"
 #include "connection.c"
 #include "templates.c"
 #include "threading.c"
 #include "queue.c"
 #include "handler.c"
-#include "utils.c"
 
 int main(int argc, char* argv[])
 {
@@ -120,216 +121,270 @@ void* serve(void * in_data)
 {
   struct thread_info* t_info = ( struct thread_info* ) in_data;
 
-  std::vector<char *> header_lines;
-
   int tid = t_info->thread_id;
-
-  char buffer[BUFFER_SIZE];
 
   printf("\nthread_id: %d", t_info->thread_id);
   fflush(stdout);
 
   while(1)
   {
+    std::vector<char *> headers;
+    std::string file_contents;
     int socket_fd = pop_task();
-
-    printf("\nGot task: %d from the task queue", socket_fd);
-    fflush(stdout);
-
-    /* zero out buffer */
-    memset( buffer, 0, sizeof( buffer ) );
-
-    /* read request from socket into buffer */
-    //read(socket_fd, buffer, BUFFER_SIZE);
-
-    /* parse the request looking for the file/directory */
-    char request_type[10];
-    char file_path[100];
-    char HTTP_ver[10];
-
-    GetHeaderLines(header_lines, socket_fd, false);
-
-    read_request( header_lines[0], request_type, file_path, HTTP_ver );
-
-
-    /* get path to file/dir */
-    char path_to_file[strlen(directory_path) + strlen(file_path)];
-    memset( path_to_file, 0, sizeof( path_to_file ) );
-
-    strcat(path_to_file, ".");
-    strcat(path_to_file, directory_path);
-    strcat(path_to_file, file_path);
-
-    // prep_file_path(directory_path, file_path, path_to_file);
-
-    printf("\npath to file: \"%s\"", path_to_file);
-    fflush(stdout);
-
+    int process_id;
+    int content_length;
     struct stat filestat;
-    int file_size = 0;
-    char file_content[MAX_FILE_SIZE];
     const char * content_type;
     const char * status;
+    char buffer[BUFFER_SIZE];
+    char response_headers[1024];
+    char request_type[10];
+    char file_name[100];
+    char HTTP_ver[10];
 
-    std::string file_contents;
+    GetHeaderLines( headers, socket_fd, false );
 
-    if( stat( path_to_file, &filestat ) ) {
-      printf("\nERROR in stat 1\n");
+    printf("\n\n\njust got headers:\n\n");
+    for ( int i = 0; i < headers.size( ); ++i )
+    {
+      printf("%s\n", headers[i]);            
+    }
+    fflush(stdout);
+
+    read_request( headers[0], request_type, file_name, HTTP_ver );
+
+    /* get path to file/dir */
+
+    char file_path[strlen(directory_path) + strlen(file_name)];
+    reset( file_path, strlen(file_path) );
+
+    char file_name_cpy[ strlen( file_name ) ];
+    strcpy( file_name_cpy, file_name );
+
+    char* file_name_cstr = strtok(file_name_cpy, "?");
+    char* env_args_cstr = strtok(NULL, "?");
+
+    strcat( file_path, "." );
+    strcat( file_path, directory_path );
+    strcat( file_path, file_name_cstr );
+
+    std::string file_path_str = file_path;
+
+    content_length = get_content_length(headers);
+    content_type = get_content_type( file_path );
+
+    printf("content-type: %s request-type: %s\n", content_type, request_type );
+
+    if( content_type == TYPE_CGI ) {
+
+      printf("found cgi or perl file extension\n");
       fflush(stdout);
 
-      file_size = 1297; //TODO make this dinamic
+      /* pipe from cgi to server */
+      int cgi_to_server_pipe[ 2 ];
+      /* pipe from server to cgi */
+      int server_to_cgi_pipe[ 2 ];
 
-      prepare_file_content("./resources/not-found.html", file_size, file_content);
-
-      content_type = TYPE_HTML;
-
-      status = HTTP_NOT_FOUND;
-
-    }
-
-    if(S_ISREG(filestat.st_mode)) {
-
-      printf("\n%s is a regular file", file_path);
-      printf("\nfile size = %lld", filestat.st_size);
-
-      file_size = filestat.st_size;
-
-      // prepare_file_content(path_to_file, file_size, file_content);
-
-      file_contents = get_file_content(path_to_file);
-
-      content_type = get_content_type(path_to_file);
-
-      status = HTTP_OK;
-
-      printf("\nfile contents:\n%s", file_content);
-      fflush(stdout);
-
-    }
-
-    if(S_ISDIR(filestat.st_mode)) {
-      printf("%s is a directory \n", file_path);
-
-      int len;
-      DIR *dirp;
-      struct dirent *dp;
-
-      std::vector<std::string> files_in_dir;
-
-      int found_index = 0;
-
-      dirp = opendir( path_to_file );
-      while ( ( dp = readdir( dirp ) ) != NULL )
+      if( pipe( server_to_cgi_pipe ) != 0 )
       {
-        printf( "\nname %s", dp->d_name );
-        fflush( stdout );
-
-        files_in_dir.push_back(dp->d_name);
-
-        if( strstr( dp->d_name, "index.html" ) )
-        {
-          printf("\nfound index.html");
-          fflush(stdout);
-
-          strcat(path_to_file, "index.html");
-
-          if( stat( path_to_file, &filestat ) ) {
-            printf("\nERROR in stat 2\n");
-            fflush(stdout);
-          }
-
-          file_size = filestat.st_size;
-
-          printf("\nfile size = %d", file_size);
-
-          memset( file_content, 0, sizeof( file_content ) );
-
-          // prepare_file_content(path_to_file, file_size, file_content);
-
-          file_contents = get_file_content(path_to_file);
-
-          printf("\n file_content size below");
-          fflush(stdout);
-
-          printf("\n file_content size = %zu", strlen(file_content));
-          fflush(stdout);
-
-          content_type = get_content_type(path_to_file);
-
-          status = HTTP_OK;
-
-          printf("\nfile contents:\n\"%s\"", file_content);
-          fflush(stdout);
-
-          found_index = 1;
-        }
+        printf( "failed to create server to cgi pipe\n" );
       }
 
-      if(!found_index)
+      if( pipe( cgi_to_server_pipe ) != 0 )
       {
-        file_contents = "<html>\n <head><meta http-equiv=\"Content-Type\"";
-        file_contents += " content=\"text/html; charset=UTF-8\">";
-        file_contents += "<title>Dir Listing for ";
-        file_contents += path_to_file;
-        file_contents += "</title><style type=\"text/css\"></style></head>";
-        file_contents += "<body bgcolor=\"#FFFFFF\" text=\"#000000\"><h2>";
-        file_contents += path_to_file;
-        file_contents += "</h2><ol>";
+        printf( "failed to create cgi to server pipe\n" );
+      }
 
-        for(int i = 0; i < files_in_dir.size(); i++)
+      process_id = fork();
+
+      if( process_id == 0 )
+      {
+        /* we are in the child process */
+
+        /* close the write side of the pipe from the server */
+        close( server_to_cgi_pipe[ 1 ] );
+        /* dup the pipe to stdin */
+        dup2( server_to_cgi_pipe[ 0 ], 0 );
+        /* close the read side of the pipe to the server */
+        close( cgi_to_server_pipe[ 0 ] );
+        /* dup the pipe to stdout */
+        dup2( cgi_to_server_pipe[ 1 ], 1 );
+
+        /* set up env variables */
+        std::vector<char*> exec_envp;
+
+        exec_envp.push_back( (char*) "GATEWAY_INTERFACE=CGI/1.1" );
+
+        std::string req_uri = "REQUEST_URI=";
+        req_uri.append( file_path );
+        exec_envp.push_back( (char*) req_uri.c_str() );
+
+        std::string req_method = "REQUEST_METHOD=";
+        req_method.append( request_type );
+        exec_envp.push_back( (char*) req_method.c_str() );
+
+        std::string query_string = "QUERY_STRING=";
+        
+        if( strstr( request_type, REQ_TYPE_GET ) )
         {
-          file_contents += "<li><a href=\"";
-          if(files_in_dir[i] == ".")
+          /* create query string header and add it to the array */
+          std::string env_args = "";
+
+          if( env_args_cstr != NULL )
           {
-            file_contents += "#";
+            env_args = env_args_cstr;
+            query_string.append( env_args_cstr );
+          }
+
+        }
+
+        exec_envp.push_back( (char*) query_string.c_str());
+
+        /* turn headers into env vars */
+        for ( int i = 1; i < headers.size( ); ++i )
+        {
+          char* header = headers[ i ];
+
+          if( strstr( header, "Content-Type:" ) != NULL || strstr( header, "Content-Length:" ) != NULL )
+          {
+            exec_envp.push_back( FormatHeader( headers[ i ], (char*) "" ) );
           }
           else
           {
-            file_contents += file_path;
-            file_contents += "/";
-            file_contents += files_in_dir[i];
+            exec_envp.push_back( FormatHeader( headers[ i ], (char*) "HTTP_" ) );
           }
-          file_contents += "\"</a>";
-          file_contents += files_in_dir[i];
-          file_contents += "</li>";
+          
         }
 
-        file_contents += "</ol></body></html>";
+        /* null terminate the env vars array */
+        exec_envp[ exec_envp.size() ] = (char*) NULL;
+        
+        std::vector<char*> exec_argv(1);
 
-        file_size = file_contents.size();
+        exec_argv[ 0 ] = (char*) NULL;        
+        
+        /* execve */
+        int err = execve( file_path_str.c_str(), &exec_argv[0], &exec_envp[0] );
+        if(err == -1)
+        {
+          fprintf(stderr, "Errno: %d, means: %s", errno, strerror(errno));
+        }
 
-        content_type = TYPE_HTML;
+        printf("\n%s\n\n", "should not get here!!");
+        fflush(stdout);
 
-        status = HTTP_OK;
+      }
+      else
+      {
+        /* we are in the parent process */
+
+        /* close the read side of the pipe to the CGI script */
+        close( server_to_cgi_pipe[ 0 ] );
+        /* close the write side of the pipe from the CGI script */
+        close( cgi_to_server_pipe[ 1 ] );
+
+        if( strstr( request_type, REQ_TYPE_POST ) )
+        {
+          /* we received a POST request */
+          printf("\n%s\n\n", "found a post");
+          fflush(stdout);
+
+          int written_so_far = 0;
+          int amount_written = 0;
+
+          /* make env vars */
+
+          if( content_length != -1 )
+          {
+            /* read body of post request */
+            reset(buffer, strlen(buffer));
+            read_content(socket_fd, buffer, content_length);
+          }
+
+          printf("\n\ncontents of POST:\n%s\npost size:%zu\n", buffer, strlen(buffer));
+          fflush(stdout);
+
+          /* send env vars to child process */
+          send_over( server_to_cgi_pipe[ 1 ], buffer, content_length );
+
+        }
+
+        /* read file contents from the child process */
+        file_contents = read_until( cgi_to_server_pipe[ 0 ] );
+
+        /* make and serve headers */
+        prepare_response_headers( file_contents.size( ), HTTP_OK, TYPE_HTML, response_headers );
+        send_over( socket_fd, response_headers, strlen( response_headers ) );
+
+        /* serve file contents */
+        send_over( socket_fd, file_contents.c_str( ), file_contents.size( ) );
+
+        /* all done, close the pipes */
+        close(server_to_cgi_pipe[1]);
+        close(cgi_to_server_pipe[0]);
       }
 
-      (void)closedir( dirp );
     }
+    else
+    {
 
-    printf("\nafter dir call");
-    fflush(stdout);
+      if( stat( file_path, &filestat ) ) {
+        printf("\nERROR in stat 1\n");
+        fflush(stdout);
 
-    /* make response headers */
-    char response_headers[ BUFFER_SIZE ];
+        respond_with_not_found( socket_fd );
 
-    prepare_response_headers( file_size, status, content_type, response_headers);
+      }
 
-    printf("\nresponse headers:\n%s", response_headers);
-    fflush(stdout);
+      if(S_ISREG(filestat.st_mode)) {
 
-    /* send response headers */
+        printf("\n%s is a regular file", file_name);
+        printf("\nfile size = %lld", filestat.st_size);
 
-    send_over( socket_fd, response_headers, strlen(response_headers) );
+        respond_with_file( socket_fd, file_path );
 
-    printf("\nsent response headers");
-    fflush(stdout);
+      }
 
-    /* send file content */
+      if(S_ISDIR(filestat.st_mode)) {
+        printf("%s is a directory \n", file_name);
 
-    send_over( socket_fd, file_contents.c_str(), file_size );
+        DIR *dirp;
+        struct dirent *dp;
 
-    printf("\nsent file content");
-    fflush(stdout);
+        std::vector<std::string> files_in_dir;
+
+        int found_index = 0;
+
+        dirp = opendir( file_path );
+        while ( ( dp = readdir( dirp ) ) != NULL )
+        {
+          printf( "\nname %s", dp->d_name );
+          fflush( stdout );
+
+          files_in_dir.push_back(dp->d_name);
+
+          if( strstr( dp->d_name, "index.html" ) )
+          {
+            printf("\nfound index.html");
+            fflush(stdout);
+
+            strcat(file_path, "index.html");
+
+            respond_with_file( socket_fd, file_path );
+
+            found_index = 1;
+          }
+        }
+
+        if(!found_index)
+        {
+          respond_with_listing( socket_fd, file_name, files_in_dir );
+        }
+
+        (void)closedir( dirp );
+      }
+
+    }
 
   }
 

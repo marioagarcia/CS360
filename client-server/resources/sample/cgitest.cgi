@@ -9,7 +9,7 @@ my $q = new CGI;
 print $q->start_html("CGI Test Page"),
     $q->h1("CGI Test Page"),
     $q->h2("Post Test:"),
-    $q->start_form(-method=>"POST"
+    $q->start_form(-method=>"POST",
         #-enctype=>&CGI::URL_ENCODED
                -action=>"cgitest.cgi"
     ),
@@ -22,7 +22,7 @@ print $q->start_html("CGI Test Page"),
     }
     print $q->hr,
     $q->h2("Get Test:"),
-    $q->start_form(-method=>"GET"
+    $q->start_form(-method=>"GET",
 # To redirect this page to another page, uncomment the following line and update the location
       -action=>"cgitest.cgi"
     ),

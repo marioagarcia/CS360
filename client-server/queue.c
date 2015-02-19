@@ -31,5 +31,4 @@ int pop_task()
 
   return task_id;
 
-
 }

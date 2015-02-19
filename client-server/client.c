@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "utils.c"
+#include "handler.c"
 
 #define SOCKET_ERROR        -1
 #define BUFFER_SIZE         1024
@@ -37,25 +38,6 @@ void close_socket(int h_socket)
   {
     printf("\nCould not close socket\n");
     exit(0);
-  }
-}
-
-void read_response(int socket, char * buffer, int content_size)
-{
-  int total_read = 0;
-  int amount_read = 0;
-  int done_reading = 0;
-
-  while(!done_reading)
-  {
-    amount_read = read(socket, buffer + total_read, content_size - total_read);
-
-    total_read += amount_read;
-
-    if(total_read >= content_size)
-    {
-      done_reading = 1;
-    }
   }
 }
 
@@ -201,7 +183,7 @@ int  main(int argc, char* argv[])
       content_size = getContentSize(header_lines);
 
       /* read from socket into buffer */
-      read_response(hSocket, pBuffer, content_size);
+      read_content(hSocket, pBuffer, content_size);
 
       /* print out the HTTP Response for debug purposes*/
       if(debug_flag)

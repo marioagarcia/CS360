@@ -1,4 +1,4 @@
-all: client server
+all:  server
 clean:
 	rm client server
 client: client.c
