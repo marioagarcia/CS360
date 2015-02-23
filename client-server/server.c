@@ -65,7 +65,7 @@ int main(int argc, char* argv[])
   printf("\nStarting server with %d threads", thread_num);
 
   /* create semaphores */
-  create_semaphores( );
+  create_semaphores();
 
   /* make a thread pool */
   make_thread_pool(threads, thread_num);
@@ -133,6 +133,7 @@ void* serve(void * in_data)
     int socket_fd = pop_task();
     int process_id;
     int content_length;
+    struct stat full_path_stat;
     struct stat filestat;
     const char * content_type;
     const char * status;
@@ -164,7 +165,14 @@ void* serve(void * in_data)
     char* file_name_cstr = strtok(file_name_cpy, "?");
     char* env_args_cstr = strtok(NULL, "?");
 
-    strcat( file_path, "." );
+    if( stat( directory_path, &full_path_stat ) ) {
+      printf("\nNot a full path\n");
+      fflush(stdout);
+
+      strcat( file_path, "." );
+
+    }
+
     strcat( file_path, directory_path );
     strcat( file_path, file_name_cstr );
 
@@ -327,6 +335,8 @@ void* serve(void * in_data)
     }
     else
     {
+      printf("file_path: %s\n", file_path);
+      fflush(stdout);
 
       if( stat( file_path, &filestat ) ) {
         printf("\nERROR in stat 1\n");
