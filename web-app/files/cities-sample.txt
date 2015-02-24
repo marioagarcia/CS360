@@ -1,0 +1,17 @@
+[
+{"city":"Panguitch"},
+{"city":"Paradise"},
+{"city":"Paragonah"},
+{"city":"Park City"},
+{"city":"Park Valley"},
+{"city":"Parowan"},
+{"city":"Payson"},
+{"city":"Peoa"},
+{"city":"Pine Valley"},
+{"city":"Pleasant Grove"},
+{"city":"Plymouth"},
+{"city":"Portage"},
+{"city":"Price"},
+{"city":"Providence"},
+{"city":"Provo"}
+]
